@@ -71,6 +71,13 @@ spring:
                 maxAge: 3600
           # Gateway Routes Configuration
           routes:
+            # GraphQL endpoint - must be BEFORE the catch-all /api/v1/** route
+            - id: propertize-graphql
+              uri: lb://propertize-service
+              predicates:
+                - Path=/graphql,/graphiql,/graphql/**
+              filters:
+                - StripPrefix=0
             # Auth Service Routes (delegate authentication)
             - id: auth-service
               uri: lb://auth-service

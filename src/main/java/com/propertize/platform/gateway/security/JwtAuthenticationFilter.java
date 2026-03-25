@@ -87,6 +87,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             "/api/v1/public/**",
             "/api/v1/properties/public/**",
             "/api/v1/organizations/onboarding/**",
+            "/api/v1/organizations/apply",
             "/api/v1/rental-applications/submit",
             "/api/v1/rental-applications/track/**",
             "/api/v1/gateway/**",

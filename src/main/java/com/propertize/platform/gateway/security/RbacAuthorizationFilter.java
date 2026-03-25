@@ -193,7 +193,7 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
 
     private static void addEndpoint(String pattern, String method, String permission) {
         ENDPOINT_PERMISSIONS.computeIfAbsent(pattern, k -> new HashMap<>())
-            .put(method.toUpperCase(), permission);
+                .put(method.toUpperCase(), permission);
     }
 
     @Override
@@ -204,7 +204,8 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
         String rolesHeader = request.getHeaders().getFirst(JwtAuthenticationFilter.X_ROLES);
         String correlationId = request.getHeaders().getFirst(JwtAuthenticationFilter.X_CORRELATION_ID);
 
-        // Skip authorization for public endpoints (already handled by JwtAuthenticationFilter)
+        // Skip authorization for public endpoints (already handled by
+        // JwtAuthenticationFilter)
         if (isPublicEndpoint(path)) {
             return chain.filter(exchange);
         }
@@ -231,11 +232,11 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
         // Check if user has required permission
         if (hasPermission(userPermissions, requiredPermission)) {
             log.debug("✅ RBAC authorized: {} {} (permission: {}) [correlationId={}]",
-                method, path, requiredPermission, correlationId);
+                    method, path, requiredPermission, correlationId);
             return chain.filter(exchange);
         } else {
             log.warn("❌ RBAC denied: {} {} - User lacks permission: {} [roles={}, correlationId={}]",
-                method, path, requiredPermission, roles, correlationId);
+                    method, path, requiredPermission, roles, correlationId);
             return onForbidden(exchange, requiredPermission);
         }
     }
@@ -317,15 +318,16 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
 
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/api/v1/auth/") ||
-               path.startsWith("/api/v1/public/") ||
-               path.startsWith("/api/v1/organizations/onboarding/") ||
-               path.equals("/api/v1/rental-applications/submit") ||
-               path.startsWith("/api/v1/rental-applications/track/") ||
-               path.startsWith("/actuator/") ||
-               path.startsWith("/swagger-ui/") ||
-               path.startsWith("/v3/api-docs/") ||
-               path.equals("/graphql") ||
-               path.startsWith("/fallback/");
+                path.startsWith("/api/v1/public/") ||
+                path.startsWith("/api/v1/organizations/onboarding/") ||
+                path.equals("/api/v1/organizations/apply") ||
+                path.equals("/api/v1/rental-applications/submit") ||
+                path.startsWith("/api/v1/rental-applications/track/") ||
+                path.startsWith("/actuator/") ||
+                path.startsWith("/swagger-ui/") ||
+                path.startsWith("/v3/api-docs/") ||
+                path.equals("/graphql") ||
+                path.startsWith("/fallback/");
     }
 
     private Mono<Void> onForbidden(ServerWebExchange exchange, String requiredPermission) {
@@ -334,14 +336,12 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
         response.getHeaders().add(HttpHeaders.CONTENT_TYPE, "application/json");
 
         String body = String.format(
-            "{\"status\":403,\"error\":\"Forbidden\",\"message\":\"Access denied. Required permission: %s\",\"path\":\"%s\"}",
-            requiredPermission,
-            exchange.getRequest().getPath().value()
-        );
+                "{\"status\":403,\"error\":\"Forbidden\",\"message\":\"Access denied. Required permission: %s\",\"path\":\"%s\"}",
+                requiredPermission,
+                exchange.getRequest().getPath().value());
 
         return response.writeWith(
-            Mono.just(response.bufferFactory().wrap(body.getBytes()))
-        );
+                Mono.just(response.bufferFactory().wrap(body.getBytes())));
     }
 
     @Override
