@@ -1,7 +1,11 @@
 package com.propertize.platform.gateway.security;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -14,8 +18,8 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * RBAC Authorization Filter for API Gateway
@@ -40,8 +44,23 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
     private final RbacConfig rbacConfig;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    // Permission cache: role -> set of permissions
-    private final Map<String, Set<String>> permissionCache = new ConcurrentHashMap<>();
+    @Value("${rbac.cache.ttl-minutes:60}")
+    private int cacheTtlMinutes;
+
+    // TTL-bounded Caffeine cache — permissions expire to pick up rbac.yml reloads
+    // (or future DB-backed permission changes) without requiring a service restart.
+    // Max 100 roles covers all built-in + custom roles with safe headroom.
+    private Cache<String, Set<String>> permissionCache;
+
+    @PostConstruct
+    void initCache() {
+        permissionCache = Caffeine.newBuilder()
+                .maximumSize(100)
+                .expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes))
+                .recordStats() // exposes hit/miss metrics via Micrometer
+                .build();
+        log.info("RBAC permission cache initialised: ttl={}min, maxSize=100", cacheTtlMinutes);
+    }
 
     // Endpoint to permission mapping (pattern -> method -> permission)
     private static final Map<String, Map<String, String>> ENDPOINT_PERMISSIONS = new LinkedHashMap<>();
@@ -179,11 +198,16 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
         // ========================================
         // PAYROLL ENDPOINTS (Wagecraft)
         // ========================================
+        addEndpoint("/api/v1/payroll", "GET", "payroll:list");
         addEndpoint("/api/v1/payroll/**", "GET", "payroll:read");
         addEndpoint("/api/v1/payroll/**", "POST", "payroll:process");
+        addEndpoint("/api/v1/payroll/**", "PUT", "payroll:update");
         addEndpoint("/api/v1/salaries/**", "*", "payroll:manage");
         addEndpoint("/api/v1/deductions/**", "*", "payroll:manage");
         addEndpoint("/api/v1/payslips/**", "GET", "payroll:read");
+        addEndpoint("/api/v1/timesheets/**", "GET", "payroll:read");
+        addEndpoint("/api/v1/timesheets/**", "POST", "payroll:create");
+        addEndpoint("/api/v1/timesheets/**", "PUT", "payroll:update");
 
         // ========================================
         // STRIPE ENDPOINTS
@@ -202,6 +226,7 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
         String path = request.getPath().value();
         String method = request.getMethod().name();
         String rolesHeader = request.getHeaders().getFirst(JwtAuthenticationFilter.X_ROLES);
+        String permissionsHeader = request.getHeaders().getFirst(JwtAuthenticationFilter.X_PERMISSIONS);
         String correlationId = request.getHeaders().getFirst(JwtAuthenticationFilter.X_CORRELATION_ID);
 
         // Skip authorization for public endpoints (already handled by
@@ -225,9 +250,32 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        // Get user's permissions based on roles
+        // Get user's permissions based on roles (YAML-backed system roles)
         Set<String> roles = parseRoles(rolesHeader);
+
+        // ── Read-only enforcement ───────────────────────────────────────────────
+        // If any of the user's roles is marked readOnly in rbac.yml restrictions,
+        // reject mutating HTTP methods (anything other than GET, HEAD, OPTIONS).
+        if (rbacConfig.isAnyRoleReadOnly(roles)) {
+            if (!"GET".equals(method) && !"HEAD".equals(method) && !"OPTIONS".equals(method)) {
+                log.warn("❌ Read-only role rejected mutating request: {} {} [roles={}, correlationId={}]",
+                        method, path, roles, correlationId);
+                return onForbidden(exchange, "read-only role cannot perform " + method + " requests");
+            }
+        }
+
         Set<String> userPermissions = getPermissionsForRoles(roles);
+
+        // Phase 2: if role not found in YAML (custom role), fall back to
+        // permissions forwarded directly from the JWT via X-Permissions header.
+        if (userPermissions.isEmpty() && permissionsHeader != null && !permissionsHeader.isBlank()) {
+            log.debug("🔄 No YAML permissions for roles {}, using X-Permissions header fallback", roles);
+            for (String p : permissionsHeader.split(",")) {
+                String trimmed = p.trim();
+                if (!trimmed.isEmpty())
+                    userPermissions.add(trimmed);
+            }
+        }
 
         // Check if user has required permission
         if (hasPermission(userPermissions, requiredPermission)) {
@@ -274,15 +322,11 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
     private Set<String> getPermissionsForRoles(Set<String> roles) {
         Set<String> allPermissions = new HashSet<>();
         for (String role : roles) {
-            // Check cache first
-            Set<String> cachedPermissions = permissionCache.get(role);
-            if (cachedPermissions != null) {
-                allPermissions.addAll(cachedPermissions);
-            } else {
-                // Load from RBAC config
-                Set<String> permissions = rbacConfig.getPermissionsForRole(role);
-                permissionCache.put(role, permissions);
-                allPermissions.addAll(permissions);
+            // Caffeine.get() returns cached value or computes and caches it atomically
+            Set<String> rolePermissions = permissionCache.get(role,
+                    k -> rbacConfig.getPermissionsForRole(k));
+            if (rolePermissions != null) {
+                allPermissions.addAll(rolePermissions);
             }
         }
         return allPermissions;
@@ -318,6 +362,7 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
 
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/api/v1/auth/") ||
+                path.startsWith("/api/v1/rbac/") ||
                 path.startsWith("/api/v1/public/") ||
                 path.startsWith("/api/v1/organizations/onboarding/") ||
                 path.equals("/api/v1/organizations/apply") ||
@@ -351,10 +396,10 @@ public class RbacAuthorizationFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Clear permission cache (call when RBAC config changes)
+     * Clear permission cache (call when RBAC config changes at runtime)
      */
     public void clearCache() {
-        permissionCache.clear();
+        permissionCache.invalidateAll();
         log.info("RBAC permission cache cleared");
     }
 }

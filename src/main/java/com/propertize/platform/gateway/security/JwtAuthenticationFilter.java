@@ -65,6 +65,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     public static final String X_TENANT_ID = "X-Tenant-Id";
     public static final String X_ROLES = "X-Roles";
     public static final String X_PRIMARY_ROLE = "X-Primary-Role";
+    public static final String X_PERMISSIONS = "X-Permissions";
     public static final String X_GATEWAY_SOURCE = "X-Gateway-Source";
     public static final String X_CORRELATION_ID = "X-Correlation-Id";
     public static final String X_TOKEN_TYPE = "X-Token-Type";
@@ -84,6 +85,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             "/api/v1/auth/public-key",
             "/api/v1/auth/.well-known/jwks.json",
             "/.well-known/jwks.json",
+            "/api/v1/rbac/**",
             "/api/v1/public/**",
             "/api/v1/properties/public/**",
             "/api/v1/organizations/onboarding/**",
@@ -92,8 +94,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             "/api/v1/rental-applications/track/**",
             "/api/v1/gateway/**",
             "/actuator/**",
+            "/swagger-ui.html",
             "/swagger-ui/**",
             "/v3/api-docs/**",
+            "/api-docs/**",
+            "/webjars/**",
             "/graphql",
             "/graphiql",
             "/fallback/**",
@@ -193,6 +198,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String sessionId = jwtTokenProvider.getSessionId(token).orElse("");
         String jti = jwtTokenProvider.getTokenId(token).orElse("");
         Set<String> roles = jwtTokenProvider.getRoles(token);
+        Set<String> permissions = jwtTokenProvider.getPermissions(token);
         String primaryRole = jwtTokenProvider.getPrimaryRole(token).orElse("");
         String tokenType = jwtTokenProvider.isAccessToken(token) ? "access" : "unknown";
 
@@ -216,6 +222,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 .header(X_GATEWAY_SOURCE, gatewaySourceValue)
                 .header(X_CORRELATION_ID, correlationId)
                 .header(X_TOKEN_TYPE, tokenType);
+
+        // Forward JWT permissions so downstream RBAC checks can use them
+        if (!permissions.isEmpty()) {
+            requestBuilder.header(X_PERMISSIONS, String.join(",", permissions));
+        }
 
         // Add optional headers if present
         if (!email.isEmpty()) {
