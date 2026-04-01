@@ -5,9 +5,10 @@ server:
   # Netty settings for better performance and large headers
   netty:
     connection-timeout: ${NETTY_CONNECTION_TIMEOUT:30s}
-    # Increase max header size to 64KB to handle large JWT tokens
+    # Increase max initial line length to 64KB to handle long request URIs
     max-initial-line-length: 65536 # 64KB for request line
-    max-header-size: 65536 # 64KB for headers (default is 8KB)
+  # Spring Boot 3.x correct property for Netty max request header size (replaces server.netty.max-header-size)
+  max-http-request-header-size: 65536 # 64KB for headers (default is 8KB)
 
 spring:
   profiles:
@@ -45,6 +46,10 @@ spring:
           default-filters:
             - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
             - AddResponseHeader=X-Gateway-Version, 1.0.0
+            # Strip Cookie header — NextAuth session cookies are for the frontend only.
+            # Forwarding them to downstream Java services inflates header size and causes HTTP 431.
+            - RemoveRequestHeader=Cookie
+            - RemoveRequestHeader=Set-Cookie
           # Global CORS configuration
           globalcors:
             cors-configurations:
@@ -180,6 +185,9 @@ security:
     source-header: X-Gateway-Source
     source-value: ${GATEWAY_SOURCE:api-gateway}
     strict-mode: false
+    # HMAC secret for signing forwarded user-context headers.
+    # Set GATEWAY_HMAC_SECRET in every service to the same value.
+    hmac-secret: ${GATEWAY_HMAC_SECRET:}
 
 # =============================================================================
 # Actuator Management Endpoints

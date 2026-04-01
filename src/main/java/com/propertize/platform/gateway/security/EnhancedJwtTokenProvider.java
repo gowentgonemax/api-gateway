@@ -154,6 +154,10 @@ public class EnhancedJwtTokenProvider {
         return Optional.ofNullable(getClaims(token).get("organizationCode", String.class));
     }
 
+    public Optional<String> getOrgType(String token) {
+        return Optional.ofNullable(getClaims(token).get("orgType", String.class));
+    }
+
     public Set<String> getRoles(String token) {
         Object rolesObj = getClaims(token).get("roles");
 

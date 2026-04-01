@@ -6,6 +6,12 @@
 # ============================================================================
 server:
   port: 8080
+  # Spring Boot 3.x — increase Netty max request header size to 64 KB.
+  # Default is 8 KB which is exceeded when the gateway adds X-Permissions + X-Roles +
+  # other context headers on top of the incoming Authorization header.
+  max-http-request-header-size: 65536
+  netty:
+    max-initial-line-length: 65536
 
 spring:
   cloud:
@@ -26,6 +32,12 @@ spring:
                 allowedHeaders: "*"
                 allowCredentials: true
                 maxAge: 3600
+          default-filters:
+            - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+            # Strip Cookie — NextAuth session cookies are frontend-only; forwarding them
+            # to downstream Java services inflates header size and triggers HTTP 431.
+            - RemoveRequestHeader=Cookie
+            - RemoveRequestHeader=Set-Cookie
           # Docker: lb:// routes via Eureka — no hardcoded hostnames
           routes:
             - id: swagger-propertize
