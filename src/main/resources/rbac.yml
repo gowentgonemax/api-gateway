@@ -39,6 +39,7 @@ rbac:
           "ORGANIZATION_UPDATE",
           "ORGANIZATION_DELETE",
           "ORGANIZATION_LIST",
+          "ORGANIZATION_LIST_ALL",
           "ORGANIZATION_CONFIGURE",
         ]
 
@@ -293,6 +294,7 @@ rbac:
         # === Organization (READ-ONLY) ===
         - "ORGANIZATION_READ"
         - "ORGANIZATION_LIST"
+        - "ORGANIZATION_LIST_ALL"
 
         # === Properties (READ-ONLY) ===
         - "PROPERTY_READ"
@@ -404,6 +406,8 @@ rbac:
         - "PAYROLL_DELETE"
         - "PAYROLL_PROCESS"
         - "PAYROLL_APPROVE"
+
+      bypass_all_checks: true
 
       capabilities:
         emergencyAccess: true
